@@ -1,0 +1,13 @@
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand h1 {
+  margin: 0;
+}
+
+.brand img {
+  display: block;
+}
