@@ -1,0 +1,4 @@
+-r requirements.txt
+
+# The installed FastAPI/Starlette TestClient recommends httpx2.
+httpx2==2.16.0

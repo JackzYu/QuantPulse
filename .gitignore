@@ -1,0 +1,13 @@
+# Local Python environments and generated files
+.venv/
+__pycache__/
+*.py[cod]
+.cache/
+
+# Secrets stay local; examples contain no secrets
+.env
+.env.*
+!.env.example
+
+# Local market data snapshots
+/backend/data/
