@@ -37,6 +37,11 @@
 .panel-heading h1, .panel-heading h2 { font-size: 12px; font-weight: 600; }
 .panel-marker { width: 7px; height: 7px; background: var(--accent); border-radius: 1px; }
 .interval-label { font-size: 10px; color: var(--muted); border: 1px solid var(--border); padding: 3px 6px; }
+.history-actions { display: flex; align-items: center; gap: 10px; }
+.download-button { padding: 6px 10px; border: 1px solid #46554d; border-radius: 3px; background: transparent; color: var(--accent); font-size: 11px; }
+.download-button:hover:not(:disabled) { border-color: var(--accent); background: #18271f; }
+.download-button:disabled { color: #747c85; border-color: #343a40; cursor: not-allowed; }
+.download-error { margin: 16px 20px; color: #f4a07c; font-size: 12px; }
 
 .query-form { display: flex; flex-direction: column; padding: 24px 20px; }
 .query-form label { color: #b9bec5; font-size: 11px; margin-bottom: 8px; }
@@ -68,6 +73,14 @@
 .close-price span { color: var(--muted); font-size: 12px; letter-spacing: 0; }
 .price-caption { margin-top: 10px; font-size: 11px; color: var(--muted); }
 .price-caption span { margin: 0 5px; }
+.price-chart { margin: 0; padding: 0 28px 22px; }
+.chart-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+.chart-heading h2 { font-size: 12px; font-weight: 500; }
+.chart-heading > span { color: var(--muted); font-size: 10px; }
+.chart-viewport { width: 100%; height: 340px; min-width: 0; }
+.chart-caption { margin-top: 14px; font-size: 11px; color: #b5bec6; line-height: 1.7; }
+.chart-legend { display: inline-block; width: 16px; height: 2px; margin-right: 7px; vertical-align: middle; background: var(--accent); }
+.chart-hint { margin-top: 6px; color: var(--muted); font-size: 10px; }
 .records-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 28px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
 .records-heading h2 { font-size: 12px; font-weight: 500; }
 .records-heading span { color: var(--muted); font-size: 11px; }
@@ -110,6 +123,9 @@
   .query-note { display: none; }
   .empty-state { min-height: 260px; padding: 32px 20px; }
   .price-summary { padding: 26px 20px; }
+  .price-chart { padding-left: 20px; padding-right: 20px; }
+  .chart-viewport { height: 280px; }
+  .chart-heading { align-items: flex-start; gap: 8px; }
   .close-price { font-size: 36px; }
   .records-heading, .table-note { padding-left: 20px; padding-right: 20px; }
   .price-table th:first-child { padding-left: 20px; }

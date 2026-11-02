@@ -1,8 +1,6 @@
-"""Test HTTP parameters, errors, and snapshots with synthetic data and no network access."""
+"""Test HTTP parameters and in-memory results with synthetic data and no network access."""
 
-import json
 from pathlib import Path
-import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -19,12 +17,13 @@ from test_snapshots import sample_history
 
 class HistoryApiTests(unittest.TestCase):
     def setUp(self):
-        directory = tempfile.TemporaryDirectory()
-        self.addCleanup(directory.cleanup)
-        self.directory = Path(directory.name)
-        storage_patch = patch("main.DATA_DIRECTORY", self.directory)
-        storage_patch.start()
-        self.addCleanup(storage_patch.stop)
+        # All API cases must work without writing or reading CSV files.
+        writer_patch = patch.object(pd.DataFrame, "to_csv", side_effect=AssertionError("Queries must not write CSV files."))
+        self.csv_writer = writer_patch.start()
+        self.addCleanup(writer_patch.stop)
+        reader_patch = patch("pandas.read_csv", side_effect=AssertionError("Queries must not read CSV files."))
+        self.csv_reader = reader_patch.start()
+        self.addCleanup(reader_patch.stop)
         provider_patch = patch("main.download_history", return_value=(sample_history(), "USD"))
         self.provider = provider_patch.start()
         self.addCleanup(provider_patch.stop)
@@ -32,7 +31,7 @@ class HistoryApiTests(unittest.TestCase):
         self.addCleanup(self.client.close)
         self.query = {"symbol": "AAPL", "start": "2024-01-02", "end": "2024-01-04"}
 
-    def test_success_normalizes_symbol_includes_end_and_saves_same_rows(self):
+    def test_success_normalizes_symbol_includes_end_and_returns_clean_rows_without_files(self):
         response = self.client.get("/history", params={**self.query, "symbol": " aapl "})
         self.assertEqual(response.status_code, 200)
         result = response.json()
@@ -46,12 +45,12 @@ class HistoryApiTests(unittest.TestCase):
         self.assertEqual(result["data"][-1]["close"], 32.0)
         self.assertNotIn("NaN", response.text)
         self.assertNotIn("Infinity", response.text)
-        csv_path = self.directory / result["snapshot"]["csv"]
-        metadata_path = self.directory / result["snapshot"]["metadata"]
-        self.assertEqual(pd.read_csv(csv_path).to_dict(orient="records"), result["data"])
-        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-        self.assertEqual(metadata["currency"], "USD")
-        self.assertEqual(metadata["requested_end_date_exclusive"], "2024-01-05")
+        self.assertIsNone(result["snapshot"])
+        self.assertEqual(result["actual_start_date"], "2024-01-02")
+        self.assertEqual(result["actual_end_date"], "2024-01-04")
+        self.assertEqual(result["cleanup"]["rows_duplicate_dates_removed"], 1)
+        self.csv_writer.assert_not_called()
+        self.csv_reader.assert_not_called()
 
     def test_invalid_parameters_do_not_contact_provider(self):
         invalid_queries = [
@@ -66,7 +65,7 @@ class HistoryApiTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 400)
                 self.assertIsInstance(response.json()["detail"], str)
         self.provider.assert_not_called()
-        self.assertEqual(list(self.directory.iterdir()), [])
+        self.csv_writer.assert_not_called()
 
     def test_missing_parameters_are_reported_by_fastapi(self):
         self.assertEqual(self.client.get("/history").status_code, 422)
@@ -81,7 +80,7 @@ class HistoryApiTests(unittest.TestCase):
         self.assertEqual(result["row_count"], 0)
         self.assertIsNone(result["snapshot"])
         self.assertIn("does not mean the symbol is invalid", result["message"])
-        self.assertEqual(list(self.directory.iterdir()), [])
+        self.csv_writer.assert_not_called()
 
     def test_source_failures_have_distinct_http_statuses_and_no_fallback(self):
         cases = [
@@ -102,19 +101,22 @@ class HistoryApiTests(unittest.TestCase):
                 self.assertNotIn("data", response.json())
                 if expected_status == 503:
                     self.assertEqual(response.headers["Retry-After"], "60")
-        self.assertEqual(list(self.directory.iterdir()), [])
+        self.csv_writer.assert_not_called()
 
     def test_unusable_source_rows_are_not_returned_as_valid_prices(self):
         self.provider.return_value = (sample_history().iloc[[3]], "USD")
         response = self.client.get("/history", params=self.query)
         self.assertEqual(response.status_code, 502)
-        self.assertEqual(list(self.directory.iterdir()), [])
+        self.csv_writer.assert_not_called()
 
-    def test_storage_failure_is_not_a_stock_not_found_error(self):
-        with patch("main.save_snapshot", side_effect=PermissionError("test permission error")):
+    def test_query_succeeds_even_when_directories_cannot_be_created(self):
+        with patch.object(Path, "mkdir", side_effect=PermissionError("test read-only filesystem")) as create_directory:
             response = self.client.get("/history", params=self.query)
-        self.assertEqual(response.status_code, 500)
-        self.assertIn("snapshot", response.json()["detail"])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["row_count"], 2)
+        create_directory.assert_not_called()
+        self.csv_writer.assert_not_called()
+        self.csv_reader.assert_not_called()
 
     def test_unknown_currency_stays_null(self):
         self.provider.return_value = (sample_history(), None)

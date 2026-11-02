@@ -6,14 +6,16 @@ The project aims to support stock analysis, factor research, machine learning-ba
 
 ## Current Progress
 
-- React frontend with a custom logo and basic styling
+- Dark React frontend with a custom logo and a three-column research layout
 - Python virtual environment configured
 - FastAPI `/stock` endpoint returns AAPL/MSFT mock data
-- React input and Search button call the backend and show a result or generic error
+- Symbol/date inputs query real historical prices with loading, empty-result, and error states
 - Standalone real historical-data sample with CSV/JSON snapshots and CSV reloading (learning stages A/B)
-- Real `GET /history` endpoint with symbol/date validation, snapshot saving, and JSON responses (learning stage C)
+- Real `GET /history` endpoint with symbol/date validation, in-memory cleanup, and JSON responses
+- On-demand browser CSV downloads of the complete query result
+- Interactive adjusted daily closing-price chart with date/price axes and point inspection
 
-The page still displays mock prices through `/stock`. Real historical data can be queried through `/history` or the standalone sample. Frontend date inputs, real records, and charts are the next learning steps.
+The page uses `/history` for real prices. The chart, table, and on-demand CSV export share the same completed query result. The legacy `/stock` mock endpoint is still available but is not used by the page.
 
 ## Tech Stack
 
@@ -101,7 +103,7 @@ Stage A originally only printed prices. Stage B added the snapshot and reload fu
 
 ## Stage B: Save and Reload the First Snapshot
 
-Run `backend/history_sample.py` as shown above. No additional dependencies or running frontend/backend services are required. Each run requests data from Yahoo again and creates a separate directory on success:
+This section describes the standalone learning script, not the web query. Run `backend/history_sample.py` as shown above. No additional dependencies or running frontend/backend services are required. Each script run requests data from Yahoo again and creates a separate directory on success:
 
 ```text
 backend/data/
@@ -150,7 +152,7 @@ Tests use explicitly synthetic fixtures, never fallback data for failed real que
 
 ## Stage C: Query Real Historical Prices Through FastAPI
 
-This stage adds `/history`. The existing `/stock` mock endpoint is unchanged and still used by the frontend. The script's yfinance download logic was moved to `backend/market_data.py` for reuse by both the script and API. No production dependencies were added; test dependencies are recorded in `backend/requirements-dev.txt`.
+This stage adds `/history`. The existing `/stock` mock endpoint is unchanged, while the frontend now uses `/history`. The script's yfinance download logic was moved to `backend/market_data.py` for reuse by both the script and API. As of November 2, 2026, web queries clean data in memory without saving or reloading CSV/JSON snapshots. No production dependencies were added; test dependencies are recorded in `backend/requirements-dev.txt`.
 
 Start the backend from the project root in **Windows Git Bash**. Manual virtual environment activation is not required:
 
@@ -184,9 +186,9 @@ Dates must use the exact `YYYY-MM-DD` format, and the start date must not be aft
 | `row_count` | Number of returned rows |
 | `actual_start_date` / `actual_end_date` | Actual trading date range; null when no rows are available |
 | `data` | Rows in ascending date order, each containing date/open/high/low/close/volume |
-| `snapshot` | Local root directory and relative file paths; null when empty. These are not HTTP download links |
+| `snapshot` | Compatibility field, always null; web queries do not create backend snapshots |
 | `message` | Explanation for an empty result; null when records are returned |
-| `cleanup` | Cleanup statistics when a snapshot exists |
+| `cleanup` | Cleanup statistics when valid rows are returned |
 
 Each row's `date` is an exchange-local `YYYY-MM-DD` string. Prices are numeric, and volume is an integer. Responses contain historical daily bars, not real-time quotes. A bar for a trading session still in progress may be incomplete; live verification used a completed historical period.
 
@@ -197,13 +199,12 @@ Browser GET /history?symbol=...&start=...&end=...
   -> main.py: receive and validate parameters, then add one day to the end date
   -> market_data.py: use yfinance to send HTTP requests to Yahoo
   -> parse Yahoo's response into history (a Python DataFrame) and currency
-  -> snapshots.py: clean with prepare_history, then save CSV and JSON metadata
-  -> main.py: use read_csv to create saved_history
-  -> saved_history.to_dict(orient="records"): convert rows to Python dictionaries
+  -> snapshots.py: clean with prepare_history, producing prices in memory
+  -> prices.to_dict(orient="records"): convert rows to Python dictionaries
   -> return the Python result dictionary; FastAPI serializes it as a JSON response
 ```
 
-Opening the endpoint in a browser displays JSON text. The real endpoint is not yet connected to React. In the next stage, the frontend will use `response.json()` to parse backend JSON into a JavaScript object and a setter to store it in React state.
+Opening the endpoint directly in a browser displays JSON text. The React page uses `response.json()` to parse backend JSON into a JavaScript object and `setResult(body)` to store it in state. No CSV file is needed to display the table.
 
 ### Errors and Empty Results
 
@@ -216,9 +217,8 @@ Opening the endpoint in a browser displays JSON text. The real endpoint is not y
 | Provider rate limit | 503; `Retry-After: 60` suggests a wait time but does not guarantee recovery after 60 seconds |
 | Recognized network timeout | 504 |
 | Other provider error or unusable source records | 502; the symbol/range may be unavailable or the provider may have failed, so an invalid symbol is not assumed |
-| Local snapshot write/read failure | 500 |
 
-Yahoo/yfinance cannot always reliably distinguish an invalid symbol from a service failure. Unknown or ambiguous provider errors therefore return 502 rather than being universally treated as empty results or 404 responses. Mock data and old snapshots never conceal a failure. Each successful query with records saves a new snapshot; automatic market data caching is not implemented.
+Yahoo/yfinance cannot always reliably distinguish an invalid symbol from a service failure. Unknown or ambiguous provider errors therefore return 502 rather than being universally treated as empty results or 404 responses. Mock data and old snapshots never conceal a failure. Web queries do not save snapshots or automatically reuse them. The standalone learning script retains its explicit snapshot workflow; yfinance may still maintain its own internal time zone/cookie cache.
 
 Downloads use `timeout=15` for individual requests supporting that parameter. yfinance may also perform preliminary time zone or cookie requests with its own timeout settings, so this is not a hard 15-second deadline for the full endpoint.
 
@@ -231,11 +231,84 @@ Install test dependencies and run offline tests from the project root in Windows
 ./backend/.venv/Scripts/python.exe -m unittest discover -s backend -p 'test_*.py' -v
 ```
 
-Dependencies are already installed in the current environment and do not need to be reinstalled on every run. httpx2 is required by the installed FastAPI/Starlette test client. Verified on October 29, 2026: all 16 offline tests, syntax checks, and `pip check` passed. A temporary Uvicorn server handled a real HTTP query for AAPL from January 2 through January 9, 2024, returning and saving six rows in USD. The weekend query returned 200 with an empty result, and reversed dates returned 400. The temporary verification server was stopped. Rate limits, timeouts, and other provider failures were tested with mocks rather than intentionally triggering live rate limits. Existing pandas deprecation warnings may still appear.
+Dependencies are already installed in the current environment and do not need to be reinstalled on every run. httpx2 is required by the installed FastAPI/Starlette test client. Initial verification on October 29, 2026 covered 16 offline tests and live HTTP queries, including six AAPL rows in USD, an empty weekend result, and reversed-date validation. On November 2, 2026, the updated 16 backend tests passed, including checks that queries never read/write CSV files and still work when directory creation is unavailable. A live Yahoo request through the FastAPI test client returned six AAPL records without changing `backend/data/`; those records were also serialized into CSV in memory. Provider failures are tested with mocks rather than intentionally triggering live rate limits. Existing pandas deprecation warnings may still appear.
 
 Suggested reading order: `get_history()` in `main.py`, then `download_history()` in `market_data.py`, then `snapshots.py`. Read the tests afterward.
 
 References: [FastAPI query parameters](https://fastapi.tiangolo.com/tutorial/query-params/) and [FastAPI error handling](https://fastapi.tiangolo.com/tutorial/handling-errors/).
+
+## Stage D: Web Queries and On-Demand CSV Downloads
+
+1. Start the frontend and backend using the commands above. Both commands run from the project root in Windows Git Bash; the backend command directly selects the virtual environment, so manual activation is unnecessary.
+2. Open <http://localhost:5173/>. The Download CSV button is initially disabled.
+3. Search for AAPL from `2024-01-02` through `2024-01-09`. The expected result is six daily records; Search does not write a market data snapshot to `backend/data/`.
+4. Click **Download CSV** in the Daily history header. The browser starts a download named `AAPL_2024-01-02_2024-01-09_1d.csv`. The browser's download settings determine the save location.
+
+The export uses the completed `result` already in React state. It does not request Yahoo again and does not use subsequently edited form values. It contains every returned row, even though the table displays only the first ten. A new search clears the old result and disables the button while loading; empty results and failed queries cannot be downloaded. Existing backend snapshots are left untouched.
+
+CSV columns:
+
+```text
+date,open,high,low,close,volume,symbol,currency,interval,price_basis,source,access_library,fetched_at_utc,start_date,end_date
+```
+
+The first six columns are cleaned OHLCV records. The remaining columns repeat query metadata so the single downloaded file remains self-describing. `start_date` and `end_date` are the inclusive requested dates. Unknown currency is an empty CSV field. Prices are exported from the response without display rounding. Fields are quoted and escaped; files use UTF-8 with a BOM and CRLF line endings for Windows/Excel compatibility.
+
+Current flow:
+
+```text
+Search -> FastAPI -> Yahoo -> prepare_history -> JSON response -> React state -> table
+Download CSV -> current result.data -> CSV text -> Blob -> browser download
+```
+
+`frontend/src/historyCsv.js` creates CSV text and starts the download using a temporary local object URL. The object URL is released after the download begins. Files are not sent to another service. The standalone `backend/history_sample.py` remains a separate learning tool that intentionally saves local snapshots when explicitly run.
+
+Run export tests from the project root in Windows Git Bash:
+
+```bash
+npm --prefix frontend test
+npm --prefix frontend run build
+```
+
+Five export tests cover all rows, full price precision, provenance, escaping, empty results, no extra network requests, and temporary URL cleanup. Download dispatch is tested with browser APIs replaced by test doubles; a real browser save dialog is not covered by those tests.
+
+The October 29 learning PDF describes the earlier save/read-back API flow. That section is historical; this README describes the current query-without-saving behavior.
+
+References: [Blob](https://developer.mozilla.org/en-US/docs/Web/API/Blob) and [object URLs](https://developer.mozilla.org/en-US/docs/Web/API/URL/createObjectURL_static).
+
+## Stage E: Historical Closing-Price Chart
+
+The central panel now shows a green closing-price line chart between the price summary and daily records. It uses **Recharts 3.10.1**, a maintained React/SVG chart library, with `react-is` matching the installed React version. `happy-dom` is a development-only dependency used to test rendering without a browser service.
+
+`App.jsx` passes the completed result into a separate component:
+
+```jsx
+<PriceChart result={result} />
+```
+
+In `PriceChart.jsx`, `LineChart` receives all `result.data`; `XAxis dataKey="date"` supplies trading dates, and `Line dataKey="close"` supplies adjusted closes. The chart plots every returned record even though the table previews only ten. No new Yahoo request or file download is needed to draw it.
+
+The chart labels the symbol, price/currency, trading date, split/dividend adjustment, and Yahoo/yfinance source. Unknown currency is explicitly identified. The price axis is automatically padded around the observed values rather than starting at zero. The line connects successive recorded closes with straight segments. Trading dates are spaced as categories; weekend and holiday prices are not inserted. Hover over the line or focus it and use arrow keys to inspect a date and price. A single-record result is shown as a point; constant prices remain visible.
+
+The chart appears only after a successful query with records. Starting a new query, receiving an empty result, or encountering an error removes the prior chart. The existing stale-request guard also protects the chart from late responses.
+
+### Local Verification
+
+Run the frontend and backend from the project root in two Windows Git Bash terminals using the startup commands above. The current environment already has the added dependencies; on another checkout, run `npm --prefix frontend ci` first. No Python virtual environment activation is required when using its explicit executable path.
+
+1. Search AAPL for `2024-01-02` through `2024-01-09`: expect six records and a line with six observations.
+2. Hover over the line or use the keyboard to inspect the full date and adjusted close. Confirm the currency and source below/above the plot.
+3. Try a longer range: the chart uses the entire result, while the table still previews ten records and Download CSV exports all records.
+4. Query a single trading date: expect a point. A weekend-only range should show the empty-result message instead of retaining the old chart.
+5. Try reversed dates, a failed request, or consecutive queries: the chart should reflect only a successful latest result.
+
+Run `npm --prefix frontend test` for all 14 frontend tests and `npm --prefix frontend run build` to check the production build. The nine chart/page tests cover empty, single, flat, full-record, changed-result, keyboard-tooltip, query/loading/error, and late-response behavior. They use a simulated DOM with fixed geometry and synthetic fixtures, not a real browser layout engine. The five CSV tests remain in place.
+
+On November 2, 2026, a real AAPL query returned six USD records and all six were verified in the rendered chart path. The resulting SVG plot was rendered and visually inspected. This does not replace manual verification of the complete page, physical mouse behavior, or responsive layout in a real browser; the browser access service was unavailable. Backend queries still create no market-data snapshots.
+
+The build succeeds but reports a JavaScript chunk over 500 kB after adding the chart library. The package audit also reports six moderate advisories in the existing ESLint/minimatch development toolchain, not in the new chart runtime packages. No forced toolchain downgrade or unrelated upgrade was applied.
+
+References: [Recharts project and installation](https://github.com/recharts/recharts), [line charts](https://recharts.github.io/en-US/examples/SimpleLineChart/), and [responsive containers](https://recharts.github.io/en-US/api/ResponsiveContainer/).
 
 ## Data Source Selection (Reviewed October 29, 2026)
 

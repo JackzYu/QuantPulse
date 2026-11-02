@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import logo from './assets/logo.png'
+import { downloadHistoryCsv } from './historyCsv.js'
+import PriceChart from './PriceChart.jsx'
 import './App.css'
 function App() {
   const [symbol, setSymbol] = useState('AAPL')
@@ -8,6 +10,7 @@ function App() {
   const [result, setResult] = useState(null)
   const [isLoading, setIsLoading] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
+  const [downloadError, setDownloadError] = useState('')
   const activeRequest = useRef(null)
 
   // Cancel any unfinished request when this component leaves the page.
@@ -21,6 +24,7 @@ function App() {
     activeRequest.current = null
     setResult(null)
     setErrorMessage('')
+    setDownloadError('')
     setIsLoading(false)
 
     if (startDate > endDate) {
@@ -68,6 +72,15 @@ function App() {
       .finally(() => {
         if (activeRequest.current === controller) setIsLoading(false)
       })
+  }
+
+  function downloadCsv() {
+    setDownloadError('')
+    try {
+      downloadHistoryCsv(result)
+    } catch {
+      setDownloadError('Could not start the CSV download. Please try again.')
+    }
   }
 
   const rows = result ? result.data : []
@@ -137,9 +150,20 @@ function App() {
         <section className="history-panel" aria-labelledby="history-heading" aria-busy={isLoading}>
           <div className="panel-heading">
             <h1 id="history-heading">Daily history</h1>
-            <span className="interval-label">1D</span>
+            <div className="history-actions">
+              <span className="interval-label">1D</span>
+              <button
+                className="download-button"
+                type="button"
+                disabled={isLoading || rows.length === 0}
+                onClick={downloadCsv}
+              >
+                Download CSV
+              </button>
+            </div>
           </div>
 
+          {downloadError && <p className="download-error" role="alert">{downloadError}</p>}
           <div className="query-feedback" aria-live="polite">
             {isLoading && (
               <div className="empty-state" role="status">
@@ -183,6 +207,8 @@ function App() {
                 </div>
                 <p className="price-caption">As of {latestRow.date} <span>·</span> Split &amp; dividend adjusted</p>
               </div>
+
+              <PriceChart result={result} />
 
               <div className="records-heading">
                 <h2>Daily records</h2>

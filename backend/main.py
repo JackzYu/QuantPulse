@@ -1,8 +1,6 @@
 from datetime import date, datetime, timedelta, timezone
-import json
 import re
 
-import pandas as pd
 from curl_cffi.requests.exceptions import Timeout as CurlTimeout
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,7 +8,7 @@ from requests.exceptions import Timeout as RequestsTimeout
 from yfinance.exceptions import YFRateLimitError
 
 from market_data import download_history
-from snapshots import DATA_DIRECTORY, save_snapshot
+from snapshots import prepare_history
 
 app = FastAPI()
 
@@ -97,26 +95,14 @@ def get_history(symbol: str, start: str, end: str):
         return result
 
     try:
-        csv_path, metadata_path = save_snapshot(
-            history, symbol, start, end_date_exclusive, fetched_at,
-            output_directory=DATA_DIRECTORY, currency=currency,
-        )
-        saved_history = pd.read_csv(csv_path)
-        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    except OSError:
-        raise HTTPException(status_code=500, detail="Unable to save or read the market data snapshot. Check the server's data directory permissions.")
+        prices, cleanup = prepare_history(history, start, end_date_exclusive)
     except (ValueError, KeyError):
         raise HTTPException(status_code=502, detail="The data provider's records could not be processed into valid daily prices. Adjust the query or try again later.")
 
-    # Convert each row to a Python dictionary; FastAPI serializes the result as a JSON response.
-    result["data"] = saved_history.to_dict(orient="records")
-    result["row_count"] = len(saved_history)
-    result["actual_start_date"] = metadata["actual_start_date"]
-    result["actual_end_date"] = metadata["actual_end_date"]
-    result["cleanup"] = metadata["cleanup"]
-    result["snapshot"] = {
-        "root": "backend/data",
-        "csv": csv_path.relative_to(DATA_DIRECTORY).as_posix(),
-        "metadata": metadata_path.relative_to(DATA_DIRECTORY).as_posix(),
-    }
+    # Return the in-memory table directly. A query never creates a CSV/JSON snapshot.
+    result["data"] = prices.to_dict(orient="records")
+    result["row_count"] = len(prices)
+    result["actual_start_date"] = str(prices["date"].iloc[0])
+    result["actual_end_date"] = str(prices["date"].iloc[-1])
+    result["cleanup"] = cleanup
     return result
